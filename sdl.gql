@@ -1,0 +1,2380 @@
+directive @isLoggedIn on FIELD_DEFINITION
+
+directive @checkRights on FIELD_DEFINITION
+
+scalar Variant
+
+"""
+Human readable timestamp
+"""
+scalar Timestamp
+
+scalar Timespan
+
+"""
+ISO-8601-like timespan
+"""
+scalar TimespanIso
+
+"""
+Hex color code - #RRGGBBAA
+"""
+scalar Color
+
+type Query {
+  """
+  Returns information about the current session. If the allSessions parameter is set to True, all sessions of the current user will be returned.
+  """
+  session(allSessions: Boolean): [Session]
+
+  """
+  Returns a nonce that can be used with e.g. the UMC SWAC login method.
+  The validFor value tells how many seconds there are left until expiry.
+  """
+  nonce: Nonce
+
+  """
+  Returns the URL of the identity provider, which can be used for the UMC SWAC login. A client application implementing SWAC login
+  should query the nonce and forward the user to the page on the URL returned by this method, where the user must log in providing their username and password,
+  along with the nonce. The returned claim and signed claim, must be then provided in the loginSWAC mutation.
+  """
+  identityProviderURL: String
+
+  """
+  Queries tags, based on the provided names list. If directRead is true, values are taken directly from PLC.
+
+  Errors:
+    0 - Success
+    2 - Cannot resolve provided name
+    202 - Only leaf elements of a Structure Tag can be addressed
+  """
+  tagValues(names: [String!]!, directRead: Boolean = false): [TagValueResult]
+
+  """
+  Queries tags, elements, types, alarms, logging tags and basically anything that has a configured name, based on the provided filter criteria. Each filter parameter can be an array, and the logical relation between each item
+  is an "OR" relation. However, the logical relation between each filter parameter is "AND".
+
+  The nameFilters parameter can be used to search for objects either with exact matching, or with wildcards (*, ?). This parameter can
+  be very powerful: it can be used to filter just on HmiObject level, on specific hierarchy levels on HmiElement level, or Subelement level.
+  Some rules regarding this: "*" matches generally any number of characters. "*::*" matches anything on object level. "*.*" matches
+  anything on element level, but only on the first hierarchy level (e.g. it matches MySystem::MyStucturedTag.ParentElement, but does not
+  match MySystem::MyStructuredTag.ParentElement.ChildElement). "*.**" matches elements on any hierarchy level, also the example before.
+  "*.**:*" matches any subelement. For example, to get all elements and their subelements of a specific tag, one must provide two strings:
+  "MySystem::MyExampleTag.**" and "MySystem::MyExampleTag.**:*". Note, that this example will still exclude MyExampleTag itself.
+  To match anything based on name, the parameter should not be provided, it should be empty, or should contain only "*".
+
+  The baseTypeFilters can be used to filter by object type name, e.g. "MySystem::MyStructureTagType". This will result in all the instances
+  of the provided types. Note: this parameter does not support wildcards.
+
+  The objectTypesFilter parameter can be used to provide some predefined HmiObjectTypes, and only items of this type or of its subtypes
+  will be returned. E.g. providing the generic HmiObjectType TAG can return SIMPLETAGs and STRUCTURETAGs as well. The objectType attribute of the
+  result will contain the exact HmiObjectType (i.e. no generic one). Note, that not all HmiObjectTypes are supported for filtering even if returned in the results.
+
+  The language parameter defines, in which language the display name should be returned.
+
+  All the parameters have default values, not providing them will result in the usage of these default values. For the filter parameters,
+  it is an empty string, and the default language is "en-US". Providing explicitly null to any of the parameters will result in a rejected request.
+
+  Pay attention to incompatible filters: e.g. mixing the object type "ALARM" with the nameFilter "*.*" will not return any result, because
+  alarms are subElements, and they would be filtered out by this nameFilter.
+
+  Errors:
+    0 - Success
+    1 - Generic error
+    2 - Cannot resolve provided name
+    3 - Argument error
+  """
+  browse(
+    nameFilters: [String] = []
+    objectTypeFilters: [ObjectTypesEnum] = []
+    baseTypeFilters: [String] = []
+    language: String = "en-US"
+  ): [BrowseTagsResult]
+
+  """
+  Queries logged tag values from the database. Names is a mandatory parameter, each name in this list must either be
+  a LoggingTag name (according to CHROM addressing rules), or a Tag name. The later works only, if there is only one logging tag
+  defined for this specific tag, otherwise no direct mapping to a logging tag can be done.
+
+  If either of the parameters startTime, endTime and maxNumberOfValues is not provided, it won't be used for filtering.
+  However, at least one of the parameters startTime and endTime must be provided and if only one of them is provided,
+  maxNumberOfValues must be provided, too. If only the startTime is provided, sortingMode must be TIME_ASC,
+  and if only endTime is provided, it must be TIME_DESC, which defines the direction of the search from a point in time.
+  The maxNumberOfValues parameter will be applied also according to this sorting mode, so e.g., in case of TIME_DESC and
+  maxNumberOfValues = 100, maximum 100 values before the endTime will be returned. When both startTime and endTime are provided,
+  the client is free to choose the sortingMode.
+  The default sorting mode is TIME_ASC.
+
+  The boundingValuesMode decides if values bounding the search interval are also returned. For example, if the startTime is today
+  12:00, and LEFT_BOUNDING_VALUES is requested, the last value prior to this time point is also returned, even if it is much earlier,
+  e.g. at yesterday evening. Such values will be marked with the BOUNDING flag in the result. Possible options are: no bounding values,
+  earlier (LEFT), later (RIGHT), or both.
+  The default is NO_BOUNDING_VALUES.
+
+  Returned values can contain specific flags, which further specify attributes of these values. For details, check the descriptions
+  of LoggedTagValueFlagsEnum members.
+
+  Errors:
+    0 - Success
+    1 - Generic error
+    2 - Cannot resolve provided name
+    3 - Argument error
+  """
+  loggedTagValues(
+    names: [String]!
+    startTime: Timestamp = "1970-01-01T00:00:00.000Z"
+    endTime: Timestamp = "1970-01-01T00:00:00.000Z"
+    maxNumberOfValues: Int = 0
+    sortingMode: LoggedTagValuesSortingModeEnum = TIME_ASC
+    boundingValuesMode: LoggedTagValuesBoundingModeEnum = NO_BOUNDING_VALUES
+  ): [LoggedTagValuesResult]
+
+  """
+  Query active alarms from the provided systems.
+  The filterString parameter must be a valid ChromQueryLanguage (based on, and very similar to SQL) string,
+  more specifically its WHERE part (without including the WHERE word itself).
+  You can use most of the simple expressions in CQL, that are valid in SQL.
+  The column names must be valid active alarm attributes, which corresponds to abut basically it can be interpreted as a single-table database in SQL.
+  You can use wildcards (* to match with any number of characters, ? to replace exactly one character),
+  less-than and greater-than, equal and similar operators, and you can use parentheses to group the expressions and connect them with logical operators such as OR or AND.
+  If the filterString contains any comparison with multilingual texts, the filterLanguage parameter is used to decide,
+  which language of the texts should be compared. All multilingual texts will be returned in the languages specified in the languages parameter.
+  All language identifying parameters must be provided in ISO language code format (e.g. "en-US", "de-DE").
+  The retrieved multilingual texts will be returned as arrays of strings, one element standing for one language specified,
+  in the order they were passed. The 'languages' attribute can be selected, that will specify this order again,
+  so they are available when processing the query.
+
+  Errors:
+    0 - Success
+    301 - Syntax error in query string
+    302 - At least one of the requested languages is invalid
+    303 - The provided filter language is invalid
+  """
+  activeAlarms(
+    systemNames: [String] = []
+    filterString: String = ""
+    filterLanguage: String = "en-US"
+    languages: [String] = ["en-US"]
+  ): [ActiveAlarm]
+
+  """
+  Query logged alarms from the storage system.
+  The filterString parameter must be a valid ChromQueryLanguage (based on, and very similar to SQL) string,
+  more specifically its WHERE part (without including the WHERE word itself).
+  You can use most of the simple expressions in CQL, that are valid in SQL.
+  The column names must be valid logged alarm attributes.
+  You can use wildcards (* to match with any number of characters, ? to replace exactly one character),
+  less-than and greater-than, equal and similar operators, and you can use parentheses to group the expressions and connect them with logical operators such as OR or AND.
+  If the filterString contains any comparison with multilingual texts, the filterLanguage parameter is used to decide,
+  which language of the texts should be compared. All multilingual texts will be returned in the languages specified in the languages parameter.
+  All language identifying parameters must be provided in ISO language code format (e.g. "en-US", "de-DE"), and must be valid logging languages.
+  The retrieved multilingual texts will be returned as arrays of strings, one element standing for one language specified,
+  in the order they were passed. The 'languages' attribute can be selected, that will specify this order again,
+  so they are available when processing the query.
+  The startTime and endTime parameters are the boundaries for reading the historical alarm entries, only alarms with ModificationTime greater than startTime,
+  and less than endTime will be read. The maxNumberOfResults restricts the amount of returned alarm entries.
+
+  Errors:
+    0 - Success
+    301 - Syntax error in query string
+    302 - At least one of the requested languages is invalid (or not logged)
+    303 - The provided filter language is invalid (or not logged)
+  """
+  loggedAlarms(
+    systemNames: [String] = []
+    filterString: String = ""
+    filterLanguage: String = "en-US"
+    languages: [String] = ["en-US"]
+    startTime: Timestamp = "1970-01-01T00:00:00.000Z"
+    endTime: Timestamp = "1970-01-01T00:00:00.000Z"
+    maxNumberOfResults: Int = 0
+  ): [LoggedAlarm]
+}
+
+type Mutation {
+  """
+  Logs a user in based on their username and password. The session token in the resulting session object have to be sent along all subsequent queries, mutations and subscriptions
+  in the 'Authorization' HTTP header, with the standard 'Bearer' prefix.
+  Note: this mutation works only if the relevant authentication plugin is configured.
+
+  Errors:
+    0 - Success
+    101 - Incorrect credentials provided
+    102 - UMC error
+  """
+  login(username: String!, password: String!): Session
+
+  """
+  Logs a user in based on the claim and signed claim that they received from the UMC SWAC authentication. The session token in the resulting Session object have to be sent along
+  all subsequent queries, mutations and subscriptions in the 'Authorization' HTTP header, with the standard 'Bearer' prefix.
+  Note: this mutation works only if the relevant auth plugin is configured.
+
+  Errors:
+    0 - Success
+    101 - Incorrect credentials provided
+    103 - Nonce expired
+  """
+  loginSWAC(claim: String!, signedClaim: String!): Session
+
+  """
+  Extends the user's current session expiry. The expiry gets increased by the 'session expires' value received by the identity provider (UMC).
+  """
+  extendSession: Session
+
+  """
+  Logs out the current user. If the allSessions parameter is set to True, all sessions of the current user will be terminated, otherwise only the current one.
+  Note: Once a session is terminated, no further queries, mutations and subscriptions can be performed with it, but it does not affect the already running queries, mutations and subscriptions.
+  """
+  logout(allSessions: Boolean): Boolean
+
+  """
+  Updates tags, based on the provided TagValueInput list.
+
+  If a TagValueInput does not define a specific timestamp, the optional timestamp parameter will be used as a fallback. If the optional timestamp parameter is not set, the current time will be used instead. Sample timestamp: '2022-04-27T01:30:32.506Z'
+  If a TagValueInput does not define a specific quality, the optional quality parameter will be used as a fallback. If the optional quality parameter is not set, GOOD quality will be assumed.
+
+  Errors:
+    0 - Success
+    2 - Cannot resolve provided name
+    201 - Cannot convert provided value to data type
+    202 - Only leaf elements of a Structure Tag can be addressed
+  """
+  writeTagValues(
+    input: [TagValueInput]!
+    timestamp: Timestamp
+    quality: QualityInput
+  ): [WriteTagValuesResult]
+
+  """
+  Acknowledge one or more alarms.
+  Each alarm identifier must have the name of the configured alarm, and optionally an instanceID, which identifies
+  one active instance of the configured alarm. If the instanceID is 0 or not provided, all instances of the given alarm will be acknowledged.
+  If an alarm requires single acknowledgement, only one item can be provided at a time, otherwise the request will be rejected.
+
+  Errors:
+    0 - Success
+    2 - Cannot resolve provided name
+    304 - Invalid object state
+    305 - The alarm cannot be read / acknowledged / reset in current state
+    x - Alarm instance does not exist
+  """
+  acknowledgeAlarms(input: [AlarmIdentifierInput]!): [ActiveAlarmMutationResult]
+
+  """
+  Reset one or more alarms.
+  Each alarm identifier must have the name of the configured alarm, and optionally an instanceID, which identifies
+  one active instance of the configured alarm. If the instanceID is 0 or not provided, all instances of the given alarm will be reset.
+  If an alarm requires single reset, only one item can be provided at a time, otherwise the request will be rejected.
+
+  Errors:
+    0 - Success
+    2 - Cannot resolve provided name
+    304 - Invalid object state
+    305 - The alarm cannot be read / acknowledged / reset in current state
+    x - Alarm instance does not exist
+  """
+  resetAlarms(input: [AlarmIdentifierInput]!): [ActiveAlarmMutationResult]
+
+  """
+  Disable the creation of new alarm instances for one or more alarms.
+
+  Errors:
+    0 - Success
+    2 - Cannot resolve provided name
+  """
+  disableAlarms(names: [String]!): [AlarmMutationResult]
+
+  """
+  Enable the creation of new alarm instances for one or more alarms.
+
+  Errors:
+    0 - Success
+    2 - Cannot resolve provided name
+  """
+  enableAlarms(names: [String]!): [AlarmMutationResult]
+
+  """
+  Shelve all active alarm instances of the provided configured alarms. New/updated alarm instances for this configured alarm will
+  still be received by any process subscribed to this system - it is up to the client to handle the shelving (e.g. by suppressing
+  all updates for the configured alarm on all subscriptions and read requests for the system). Shelving causes a notification for
+  all concerned alarm instances.
+  The shelveTimeout parameter can be used to automatically unshelve these alarms after the given time period. If not provided, the runtime's configured
+  shelving timeout will be used. The timeout must be in the configured range.
+
+  Errors:
+    0 - Success
+    2 - Cannot resolve provided name
+  """
+  shelveAlarms(
+    names: [String]!
+    shelveTimeout: Timespan = 0
+  ): [AlarmMutationResult]
+
+  """
+  Revert the Shelve action for the provided configured alarms. Unshelving causes a notification for all concerned alarm instances.
+
+  Errors:
+    0 - Success
+    2 - Cannot resolve provided name
+  """
+  unshelveAlarms(names: [String]!): [AlarmMutationResult]
+}
+
+type Subscription {
+  """
+  Subscribes to tag values for the tags based on the provided names list. Notifications will contain a notification reason, that informs about the type of the notification:
+
+  Unknown: should not occur, error.
+  Added: the initial notification about a tag. All requested tags will start with such a notification, even if it could not be added to the subscription. In this case, the error field provides more information.
+  Modified: normal value change.
+  Removed: the tag was removed from the subscription because, for example, it was deleted from the system.
+  Removed (Name changed): the tag was removed from the subscription, because its name has changed (therefore, it must be subscribed again with its new name).
+
+  Errors:
+    0 - Success
+    2 - Cannot resolve provided name
+    202 - Only leaf elements of a Structure Tag can be addressed
+  """
+  tagValues(names: [String!]!): TagValueNotification
+
+  """
+  Subscribe for active alarms matching the given filters. Notifications will contain a notification reason, that informs about the type of the notification:
+
+  Added: active alarms newly added to the subscription.
+  Modified: an active alarm that was already part of the subscription has changed.
+  Removed: an active alarm that is no longer part of the subscription (either because it was cleared, or no longer matches the filter criteria).
+
+  For other details regarding the parameters, please refer to the description of the activeAlarms query.
+
+  Errors:
+    0 - Success
+    301 - Syntax error in query string
+    302 - At least one of the requested languages is invalid
+    303 - The provided filter language is invalid
+  """
+  activeAlarms(
+    systemNames: [String] = []
+    filterString: String = ""
+    filterLanguage: String = "en-US"
+    languages: [String] = ["en-US"]
+  ): ActiveAlarmNotification
+
+  """
+  Subscribes to redu state. Notifications will contain information about the active/passive state of the given system and will come on a state change.
+  """
+  reduState: ReduStateNotification
+}
+
+type Error {
+  code: String
+  description: String
+}
+
+type Quality {
+  quality: MainQuality
+  subStatus: QualitySubStatus
+  limit: QualityLimit
+  extendedSubStatus: QualityExtendedSubStatus
+  sourceQuality: Boolean
+  sourceTime: Boolean
+  timeCorrected: Boolean
+}
+
+input QualityInput {
+  quality: MainQuality!
+  subStatus: QualitySubStatus
+}
+
+enum MainQuality {
+  """
+  The value is not useful for reasons indicated by the sub-status
+  """
+  BAD
+
+  """
+  The quality of the value is less than normal, but the value may still be useful. The reason is indicated by the sub-status
+  """
+  UNCERTAIN
+
+  """
+  The quality of the value is good
+  """
+  GOOD_NON_CASCADE
+
+  """
+  The quality of the value is good and may be used in control
+  """
+  GOOD_CASCADE
+}
+
+enum QualitySubStatus {
+  """
+  There is no specific reason
+  """
+  NON_SPECIFIC
+
+  """
+  BAD: The value is not useful because of some inconsistency regarding the configuration
+  """
+  CONFIGURATION_ERROR
+
+  """
+  BAD: The value is not reliable because the connection to the provider has been disconnected at consumer-side, e.g. a communication driver actively disconnects from a PLC on user request or by design
+  """
+  NOT_CONNECTED
+
+  """
+  BAD: The sensor is providing unusable values
+  """
+  SENSOR_FAILURE
+
+  """
+  BAD: The device has failed, and there is no usable value
+  """
+  DEVICE_FAILURE
+
+  """
+  BAD: The value is not useful because the communication to the data source failed, however a last known value is available
+  """
+  NO_COMMUNICATION_WITH_LAST_USABLE_VALUE
+
+  """
+  BAD: The value is not useful because the communication to the data source failed or has never been established since it was last out of service and a last known value is not available
+  """
+  NO_COMMUNICATION_NO_USABLE_VALUE
+
+  """
+  BAD: The value is not reliable because the provider side has been disabled or shut down, e.g. a PLC is shut down for maintenance purposes
+  """
+  OUT_OF_SERVICE
+
+  """
+  UNCERTAIN: The connection to the data source is still established; however, the data source stopped updating the value for some reason
+  """
+  LAST_USABLE_VALUE
+
+  """
+  UNCERTAIN: A predefined value is used in case of an invalid value due to communication issues with the data source or a range violation
+  """
+  SUBSTITUTE_VALUE
+
+  """
+  UNCERTAIN: A predefined value intended for the startup of the HMI system (or a subordinate device) is used while not being able to provide values from the data source
+  """
+  INITIAL_VALUE
+
+  """
+  UNCERTAIN: Sensor conversion not accurate
+  """
+  SENSOR_CONVERSION
+
+  """
+  UNCERTAIN: The value lies outside the range defined by min value and max value. The Limits define which direction (min or max) has been exceeded
+  """
+  RANGE_VIOLATION
+
+  """
+  UNCERTAIN: A value derived from multiple values has less than the required number of good sources. This includes data aggregation by means of data compression algorithms
+  """
+  SUB_NORMAL
+
+  """
+  UNCERTAIN: Configuration error
+  """
+  CONFIG_ERROR
+
+  """
+  UNCERTAIN: The value is provided by simulation, not by the real process
+  """
+  SIMULATED_VALUE
+
+  """
+  UNCERTAIN: Sensor calibration required
+  """
+  SENSOR_CALIBRATION
+
+  """
+  GOOD (NON-CASCADE): Active update event - Set if the value is good and the block has an active update event
+  """
+  UPDATE_EVENT
+
+  """
+  GOOD (NON-CASCADE): Active advisory alarm - Set if the value is good and the block has an active alarm with a priority less than 8
+  """
+  ADVISORY_ALARM
+
+  """
+  GOOD (NON-CASCADE): Active critical alarm - Set if the value is good and the block has an active alarm with a priority greater than or equal to 8
+  """
+  CRITICAL_ALARM
+
+  """
+  GOOD (NON-CASCADE): Unacknowledged update event - Set if the value is good and the block has an unacknowledged update event
+  """
+  UNACK_UPDATE_EVENT
+
+  """
+  GOOD (NON-CASCADE): Unacknowledged advisory alarm - Set if the value is good and the block has an unacknowledged alarm with a priority less than 8
+  """
+  UNACK_ADVISORY_ALARM
+
+  """
+  GOOD (NON-CASCADE): Unacknowledged critical alarm - Set if the value is good and the block has an unacknowledged alarm with a priority greater than or equal to 8
+  """
+  UNACK_CRITICAL_ALARM
+
+  """
+  GOOD (NON-CASCADE, CASCADE): The value is from a block that wants its downstream  output block (e.g. AO) to go to fail safe
+  """
+  INIT_FAILSAFE
+
+  """
+  GOOD (NON-CASCADE): Maintenance required
+  """
+  MAINTENANCE_REQUIRED
+
+  """
+  GOOD (CASCADE): Initialization acknowledge - The value is an initialized value from a source (cascade input, remote-cascade in, and remote-output in parameters)
+  """
+  INIT_ACKED
+
+  """
+  GOOD (CASCADE): Initialization request - The value is an initialization value for a source (back calculation input parameter), because the lower loop is broken or the mode is wrong
+  """
+  INITREQ
+
+  """
+  GOOD (CASCADE): The value is from a block which does not have a target mode that would use this input
+  """
+  NOT_INVITED
+
+  """
+  GOOD (CASCADE): The value is from a block which should not be selected, due to conditions in or above the block
+  """
+  DO_NOT_SELECT
+
+  """
+  GOOD (CASCADE): The value has been overridden by the user or some logic in order to continue operation
+  """
+  LOCAL_OVERRIDE
+}
+
+enum QualityLimit {
+  """
+  Data quality unrelated to limits
+  """
+  OK
+
+  """
+  The value has exceeded its low limit
+  """
+  LOW_LIMIT_VIOLATION
+
+  """
+  The value has exceeded its high limit
+  """
+  HIGH_LIMIT_VIOLATION
+
+  """
+  The value cannot move, no matter what the process does
+  """
+  CONSTANT
+}
+
+enum QualityExtendedSubStatus {
+  """
+  No CHROM specific extended sub-status is associated with this value
+  """
+  NON_SPECIFIC
+
+  """
+   BAD: The value has been calculated out of multiple values with less than the required number of good sources
+  UNCERTAIN: The value has been calculated out of multiple values with less than the required number of good sources to be GOOD as well as less than the required number of bad sources to be BAD
+  GOOD: The value has been calculated out of multiple (good) values
+  """
+  AGGREGATED_VALUE
+
+  """
+  BAD: A (logged) value has been identified to be incorrect, but a respective correction value is not available
+  """
+  UNUSABLE_VALUE
+
+  """
+   BAD: The provider of the value (e.g. logging tag for logged value) has been disabled and the previous value was BAD
+  UNCERTAIN: The provider of the value (e.g. logging tag for logged value) has been disabled and the previous value was GOOD or UNCERTAIN
+  """
+  DISABLED
+
+  """
+  GOOD: A (logged) value has been created manually
+  """
+  MANUAL_INPUT
+
+  """
+  GOOD: A (logged) value has been corrected
+  """
+  CORRECTED_VALUE
+
+  """
+  GOOD: The local data source has been initialized with the last usable value, if present inside a local persistency
+  """
+  LAST_USABLE_VALUE
+
+  """
+  GOOD: The local data source has been initialized with the configured initial value
+  """
+  INITIAL_VALUE
+}
+
+"""
+Session data, contains the session token and various user details
+"""
+type Session {
+  user: User
+  token: String
+  expires: Timestamp
+  error: Error
+}
+
+"""
+User data, where autoLogoffSec defines the number of seconds the user's session will be kept alive in case of inactivity.
+"""
+type User {
+  id: ID
+  name: String
+  groups: [UserGroup]
+  fullName: String
+  language: String
+  autoLogoffSec: Int
+}
+
+type UserGroup {
+  id: ID
+  name: String
+}
+
+type Nonce {
+  value: String
+  validFor: Int
+}
+
+"""
+UMC-S/L type
+"""
+enum phmi_UmcServiceKind {
+  UMCL
+  UMCS
+  GUM
+}
+
+"""
+User information fetched from Central or Local User Management
+"""
+type phmi_User {
+  """
+  An identifier provided by UMC. This identifier may not be used as a unique identifier an may change
+  """
+  id: ID
+
+  """
+  Unique name of user
+  """
+  name: String
+
+  """
+  The fullName attribute configured in UMC
+  """
+  fullName: String
+
+  """
+  The configured user language in UMC
+  """
+  language: String
+}
+
+"""
+Group configured within Central or Local User Management
+"""
+type phmi_UserGroup {
+  """
+  An identifier provided by UMC. This identifier may not be used as a unique identifier an may change
+  """
+  id: ID
+
+  """
+  Unique name of group
+  """
+  name: String
+}
+
+"""
+User information fetched from Central or Local User Management
+"""
+input phmi_UserInput {
+  """
+  An identifier provided by UMC. This identifier may not be used as a unique identifier an may change
+  """
+  id: ID
+
+  """
+  Unique name of user
+  """
+  name: String
+
+  """
+  User groups as configured in Central or Local User Management that this user is a member
+  """
+  groups: [phmi_UserGroupInput]
+}
+
+"""
+Group configured within Central or Local User Management
+"""
+input phmi_UserGroupInput {
+  """
+  An identifier provided by UMC. This identifier may not be used as a unique identifier an may change
+  """
+  id: ID
+
+  """
+  Unique name of group
+  """
+  name: String
+}
+
+"""
+Scalar type for system id
+"""
+scalar SystemIDType
+
+"""
+The `Upload` scalar type represents a file upload.
+"""
+scalar Upload
+
+"""
+Chrom identifier
+"""
+scalar Ref
+
+"""
+A device is identified by a certain identity
+"""
+enum phmi_IdentityType {
+  IP_ADDRESS
+}
+
+"""
+Configuration change reason
+- INITIAL: Reserved, if we need to inidicate existance of an item
+- CREATED: An Item was created
+- DELETED: An Item was deleted
+- UPDATED: An Item was changed
+"""
+enum phmi_Reason {
+  INITIAL
+  CREATED
+  DELETED
+  UPDATED
+}
+
+enum phmi_WebDataType {
+  WEBCLIENTDATA
+  USERDATA
+}
+
+"""
+Strategy during import how to resolve conflicts
+"""
+enum phmi_ConflictResolutionCriteria {
+  NONE
+  RENAME
+  OVERRIDE
+}
+
+"""
+User type specific configuration is meant for either a specific user, a group or device
+"""
+enum phmi_ObjectType {
+  USER
+  GROUP
+  DEVICE
+}
+
+"""
+Input type of ObjectId used for all phmi functions
+"""
+input phmi_ObjectIdInput {
+  name: String!
+  system: SystemIDType! = 0
+  typeId: phmi_ObjectType! = DEVICE
+}
+
+"""
+Result type of ObjectId
+"""
+type phmi_ObjectId {
+  name: String
+  system: SystemIDType
+  typeId: phmi_ObjectType
+}
+
+"""
+Input type of objectid with data type
+"""
+input phmi_SettingRefInput {
+  name: String!
+  system: SystemIDType = 0
+  typeId: phmi_WebDataType!
+}
+
+"""
+Carries an objectId plus the type
+"""
+type phmi_SettingRefResult {
+  name: String
+  system: SystemIDType
+  typeId: phmi_WebDataType
+}
+
+"""
+A function right supported by an authenticated user
+"""
+type phmi_FunctionRight {
+  name: String
+}
+
+"""
+Carries item specific error data
+"""
+type phmi_ErrorData {
+  id: phmi_SettingRefResult
+  error: Error
+}
+
+"""
+Carries items specific error data
+"""
+type phmi_Error {
+  id: phmi_ObjectId
+  error: Error
+}
+
+"""
+Filter to specify which user session should be intercepted.
+If filter attributes are combined, all attributes must match the session.
+
+Filter Attributes:
+- ipAddress: If provided, only sessions matching this attribute will be returned
+- user: If provided, only sessions matching this attribute will be returned.
+
+WebDataTypes: Specifies the data expected in the return type's data attributes.
+- WEBCLIENTDATA returns a json string containing zoom factor, vertical and horizontal scroll position
+- USER DATA returns the same as WEBCLIENTDATA
+"""
+input phmi_SessionFilter {
+  ipAddress: String
+  user: String
+  webDataType: phmi_WebDataType! = WEBCLIENTDATA
+}
+
+"""
+Session data returned. The 'data' attributes carries a type specific data in json format
+"""
+type phmi_SessionData {
+  error: Error
+  ipAddress: String
+  sessionId: String
+  system: SystemIDType
+  user: String
+  userAgent: String
+  data: String
+}
+
+"""
+Result type of browing names of configured screens for the project
+"""
+type phmi_BrowseScreenData {
+  displayName: String
+  name: String
+  id: String
+}
+
+"""
+Screen configuration data requested from configuration services
+"""
+type phmi_ScreenData {
+  id: String
+  name: String
+  error: Error
+  resolution: phmi_Resolution
+  screenWindows: [phmi_ScreenWindowData]
+}
+
+"""
+Specify the categories of web client data that the service should import
+
+ConflictResolutionCriteria:
+   - NONE purge existing data and import new settings
+   - RENAME not implemented
+   - OVERRIDE not implemented
+"""
+input phmi_ImportInput {
+  system: SystemIDType = 0
+  webDataTypes: [phmi_WebDataType] = [WEBCLIENTDATA]
+  mode: phmi_ConflictResolutionCriteria
+}
+
+"""
+Specify the data to be exported
+"""
+input phmi_ExportInput {
+  system: SystemIDType = 0
+  webDataTypes: [phmi_WebDataType] = [WEBCLIENTDATA]
+}
+
+"""
+The result of an import operation
+"""
+type phmi_ImportResult {
+  system: SystemIDType
+  log: String
+  error: Error
+}
+
+"""
+The result of an export operation
+"""
+type phmi_ExportResult {
+  system: SystemIDType
+  yaml: String
+  error: Error
+}
+
+"""
+The result type of compatibility information
+- projectRtReleaseNo indicates the project's device version it was compiled for
+- supportedRtReleaseNo indicates since when (device version) the feature is supported
+- moduleDetails list configured modules including their supported facets
+- facetDetails is deprecated and kept for compatibility
+"""
+type phmi_CompatibilityInformation {
+  projectRtReleaseNo: String
+  supportedRtReleaseNo: String
+  moduleDetails: [phmi_ModuleDetails]
+  facetDetails: [phmi_FacetDetails]
+  error: Error
+}
+
+"""
+The result of supported modules
+"""
+type phmi_ModuleDetails {
+  name: String
+  minVersion: String
+  facetDetails: [phmi_FacetDetails]
+  error: Error
+}
+
+"""
+The result type of supported facets
+"""
+type phmi_FacetDetails {
+  name: String
+  minVersion: String
+  error: Error
+}
+
+"""
+The input type when creating a device specific client.
+The webclient implicitly contains the start screen facet. The WebClient API is subject to change in the future.
+"""
+input phmi_WebClientInput {
+  id: phmi_SettingRefInput!
+  identity: String!
+  identityType: phmi_IdentityType!
+  screenWindows: [phmi_ScreenWindowRefInput]
+  startScreenRef: phmi_ScreenRefInput
+  startScreenName: String
+  zoomAndPosition: phmi_ZoomAndPositionInput
+  autoLogin: Boolean
+}
+
+"""
+Result type of a device specific client. This data type implicitly contains the start screen facet.
+"""
+type phmi_WebClientResult {
+  id: phmi_SettingRefResult
+  identity: String
+  identityType: phmi_IdentityType
+  screenWindows: [phmi_ScreenWindowRef]
+  startScreenRef: phmi_ScreenRef
+  zoomAndPosition: phmi_ZoomAndPosition
+  autoLogin: Boolean
+  error: Error
+}
+
+input phmi_ScreenWindowRefInput {
+  id: Int
+  screenName: phmi_ScreenRefInput!
+}
+
+input phmi_ScreenRefInput {
+  ref: Ref
+}
+
+type phmi_Resolution {
+  width: Int
+  height: Int
+}
+
+"""
+Input type of zoom and position.
+Attributes 'width' and 'height' are considered depricated and are not used
+"""
+input phmi_ZoomAndPositionInput {
+  factor: Float
+  top: Int
+  left: Int
+  width: Int
+  height: Int
+}
+
+"""
+Result type of zoom and position.
+Attributes 'width' and 'height' are considered depricated and are not used
+"""
+type phmi_ZoomAndPosition {
+  factor: Float
+  top: Int
+  left: Int
+  width: Int
+  height: Int
+}
+
+type phmi_ScreenWindowData {
+  id: Int
+  name: String
+  screen: String
+  screenName: String
+}
+
+type phmi_ScreenWindowRef {
+  id: Int
+  error: Error
+  name: String
+  screenName: phmi_ScreenRef
+}
+
+type phmi_ScreenRef {
+  name: String
+  ref: Ref
+}
+
+"""
+***General API***:
+Configuration change data for phmi objects
+"""
+type phmi_WebDataChangeNotification {
+  id: phmi_ObjectId!
+  facets: [String]
+  reason: phmi_Reason!
+  error: Error
+}
+
+"""
+***User Specific API***:
+Input item for user specific configuration data
+"""
+input phmi_UserDataInput {
+  id: phmi_ObjectIdInput!
+  priority: Int
+}
+
+"""
+***User Specific API***:
+Result type for user specific configuration data
+"""
+type phmi_UserData {
+  id: phmi_ObjectId
+  priority: Int
+  error: Error
+}
+
+"""
+***User Specific API***:
+Result data user specific start screen facet
+"""
+type phmi_StartScreenResultData {
+  id: phmi_ObjectId
+  data: phmi_StartScreenSettingsResult
+  error: Error
+}
+
+"""
+***User Specific API***:
+Input data user specific start screen facet
+"""
+input phmi_StartScreenInputData {
+  id: phmi_ObjectIdInput!
+  data: phmi_StartScreenSettingsInput!
+}
+
+"""
+***User/Device Specific API***:
+Result data for start screen facet
+"""
+type phmi_StartScreenSettingsResult {
+  startScreenRef: phmi_ScreenRef
+  zoomAndPosition: phmi_ZaPResult
+}
+
+"""
+***User/Device Specific API***:
+Result data for start screen facet
+"""
+input phmi_StartScreenSettingsInput {
+  startScreenRef: Ref
+  zoomAndPosition: phmi_ZaPInput
+}
+
+"""
+***User/Device Specific API***:
+Result type of zoom and position
+"""
+type phmi_ZaPResult {
+  factor: Float
+  top: Int
+  left: Int
+}
+
+"""
+***User/Device Specific API***:
+input type of zoom and position
+"""
+input phmi_ZaPInput {
+  factor: Float
+  top: Int
+  left: Int
+}
+
+type phmi_KioskResultData {
+  id: phmi_ObjectId
+  kioskSettings: phmi_KioskSettings
+  error: Error
+}
+
+type phmi_KioskResultDataWithIdentity {
+  id: phmi_ObjectId
+  identity: String
+  kioskSettings: phmi_KioskSettings
+  error: Error
+}
+
+type phmi_KioskBreakOutData {
+  isEnabled: Boolean!
+  selectedKey: String!
+  keys: [String!]!
+  isPinConfigured: Boolean!
+  pin: String
+}
+
+type phmi_KioskSettings {
+  lockDownStatus: Boolean!
+  autoLaunchStatus: Boolean
+  breakOutData: phmi_KioskBreakOutData
+  folderData: phmi_KioskFolderData
+}
+
+type phmi_KioskFolderData {
+  folderItems: [phmi_KioskFolderItem!]!
+  isExternalDriveAccessible: Boolean!
+}
+
+type phmi_KioskFolderItem {
+  path: String!
+  isDefault: Boolean!
+}
+
+type phmi_DownloadPackageResponse {
+  data: String
+  isFollows: Boolean
+  error: Error
+}
+
+type phmi_DownloadablePackageDetails {
+  id: String
+  name: String
+  extension: String
+  size: Int
+  version: String
+  description: String
+  displayName: String
+  error: Error
+}
+
+input phmi_KioskInputData {
+  id: phmi_ObjectIdInput!
+  kioskSettings: phmi_KioskSettingsInput!
+}
+
+input phmi_KioskBreakOutDataInput {
+  isEnabled: Boolean!
+  selectedKey: String!
+  keys: [String!]!
+  isPinConfigured: Boolean!
+  pin: String
+}
+
+"""
+autoLaunchStatus in the below input is an optional parameter (true by default) to support backward compatibility.
+In V19, Station Configurator(on startup) launches kiosk mode by default
+while from V20 onwards auto launch of kiosk mode on startup is configurable.
+"""
+input phmi_KioskSettingsInput {
+  lockDownStatus: Boolean!
+  autoLaunchStatus: Boolean = true
+  breakOutData: phmi_KioskBreakOutDataInput!
+  folderData: phmi_KioskFolderDataInput!
+}
+
+input phmi_KioskFolderDataInput {
+  folderItems: [phmi_KioskFolderItemInput!]!
+  isExternalDriveAccessible: Boolean!
+}
+
+input phmi_KioskFolderItemInput {
+  path: String!
+  isDefault: Boolean!
+}
+
+input TagValueInput {
+  name: String!
+  value: Variant!
+  timestamp: Timestamp
+  quality: QualityInput
+}
+
+type Value {
+  value: Variant
+  timestamp: Timestamp
+  quality: Quality
+}
+
+type TagValueResult {
+  name: String
+  value: Value
+  error: Error
+}
+
+type WriteTagValuesResult {
+  name: String
+  error: Error
+}
+
+type TagValueNotification {
+  name: String
+  value: Value
+  error: Error
+  notificationReason: String
+}
+
+type BrowseTagsResult {
+  name: String
+  displayName: String
+  objectType: String
+  dataType: String
+}
+
+enum ObjectTypesEnum {
+  TAG
+  SIMPLETAG
+  STRUCTURETAG
+  TAGTYPE
+  STRUCTURETAGTYPE
+  SIMPLETAGTYPE
+  ALARM
+  ALARMCLASS
+  LOGGINGTAG
+}
+
+type LoggedTagValuesResult {
+  loggingTagName: String
+  error: Error
+  values: [LoggedValue]
+}
+
+type LoggedValue {
+  value: Value
+  flags: [LoggedTagValueFlagsEnum]
+}
+
+enum LoggedTagValuesSortingModeEnum {
+  TIME_ASC
+  TIME_DESC
+}
+
+enum LoggedTagValuesBoundingModeEnum {
+  NO_BOUNDING_VALUES
+  LEFT_BOUNDING_VALUES
+  RIGHT_BOUNDING_VALUES
+  LEFTRIGHT_BOUNDING_VALUES
+}
+
+enum LoggedTagValueFlagsEnum {
+  """
+  More than one piece of data that may be hidden exists at same timestamp.
+  """
+  EXTRA
+
+  """
+  Calculated value based on a configured logging cycle.
+  If CALCULATED is NOT set, then the value is a raw value.
+  """
+  CALCULATED
+
+  """
+  Specifies that not all values of an aggregation cycle have been considered in the aggregation calculation (aggregated LoggingTag).
+  """
+  PARTIAL
+
+  """
+  Specifies that this value is a bounding value.
+  """
+  BOUNDING
+
+  """
+  There is no data available for the given filter set.
+  """
+  NO_DATA
+
+  """
+  This is the first value available in the storage system.
+  """
+  FIRST_STORED
+
+  """
+  This is the last value available in the storage system.
+  """
+  LAST_STORED
+
+  """
+  NOT YET IMPLEMENTED.
+  """
+  HAS_REF_TIMESTAMP
+
+  """
+  NOT YET IMPLEMENTED.
+  """
+  IS_MULTIVALUE
+
+  """
+  NOT YET IMPLEMENTED.
+  """
+  LAST_AGGREGATED_VALUE_BEFORE_VERY_LAST_CYCLE
+}
+
+type AlarmMutationResult {
+  alarmName: String
+  error: Error
+}
+
+type ActiveAlarmMutationResult {
+  alarmName: String
+  alarmInstanceID: Int
+  error: Error
+}
+
+input AlarmIdentifierInput {
+  name: String!
+  instanceID: Int = 0
+}
+
+type LoggedAlarm {
+  """
+  Canonical name of the configured alarm.
+  """
+  name: String
+
+  """
+  A number, that identifies the instance of the configured alarm. Used for alarms that can have multiple active instances at the same time,
+  so that they can be differentiated.
+  """
+  instanceID: Int
+
+  """
+  Custom ID of the Alarm Group that this alarm belongs to.
+  """
+  alarmGroupID: Int
+
+  """
+  The time when the alarm was activated.
+  """
+  raiseTime: Timestamp
+
+  """
+  The time when the alarm was acknowledged by an operator.
+  """
+  acknowledgmentTime: Timestamp
+
+  """
+  The time when the alarm was cleared.
+  """
+  clearTime: Timestamp
+
+  """
+  The time when the alarm was reset.
+  """
+  resetTime: Timestamp
+
+  """
+  The time when the last modification on any attribute of the active alarm was done.
+  """
+  modificationTime: Timestamp
+
+  """
+  Actual state of the active alarm (can change according to the stateMachine attribute).
+  """
+  state: AlarmState
+
+  """
+  The text color of the alarm on an alarm screen.
+  """
+  textColor: Color
+
+  """
+  The background color of the alarm on an alarm screen.
+  """
+  backColor: Color
+
+  """
+  The languages selected by the client. The order of languages in this array corresponds to the text entries in each returned multilingual text attribute.
+  E.g., if the first language of this array is "en-US", the first entry of the event text will be in English.
+  """
+  languages: [String]
+
+  """
+  Canonical name of the alarm class configured for this alarm.
+  """
+  alarmClassName: String
+
+  """
+  Symbol of the alarm class configured for this alarm (language-dependent).
+  """
+  alarmClassSymbol: [String]
+
+  """
+  Custom ID of the alarm class configured for this alarm.
+  """
+  alarmClassID: Int
+
+  """
+  The state machine configured for this alarm. It defines the possible states of the alarm, and possible transitions between these states.
+  """
+  stateMachine: AlarmStateMachine
+
+  """
+  Current priority of the alarm. Possible ranges:
+  0: None (no priority is assigned to the alarm)
+  1-5: Low (mostly informative alarms)
+  6-10: Medium (warnings)
+  11-15: High (errors)
+  16: Highest (critical alarms)
+  """
+  priority: Int
+
+  """
+  A list of additional parameter values that are relevant from this alarm's point of view.
+  """
+  alarmParameterValues: [Variant]
+
+  """
+  Multilingual alarm text providing a distinction of the alarm condition. Possible values are product or user-defined.
+  This attribute is used only in DCS.
+  """
+  alarmType: [String]
+
+  """
+  Multilingual alarm text, usually contains the main message of the alarm.
+  """
+  eventText: [String]
+
+  """
+  Multilingual alarm text that can contain additional information for the operator, like instructions or standard operating procedure.
+  """
+  infoText: [String]
+
+  """
+  Multilingual alarm texts (1-9) for any additional information.
+  """
+  alarmText1: [String]
+  alarmText2: [String]
+  alarmText3: [String]
+  alarmText4: [String]
+  alarmText5: [String]
+  alarmText6: [String]
+  alarmText7: [String]
+  alarmText8: [String]
+  alarmText9: [String]
+
+  """
+  Localized, textual representation of the alarm state.
+  """
+  stateText: [String]
+
+  """
+  Name of the alarm generating object, specific to this alarm instance. It could be an operator station, or an automation function (block).
+  """
+  origin: String
+
+  """
+  Name of the area that this specific alarm instance is related to.
+  """
+  area: String
+
+  """
+  The reason of modification to this alarm instance.
+  """
+  changeReason: [AlarmChangeReason]
+
+  """
+  Current triggering limit of the value when the alarm was raised; updated value limit when the alarm cleared in case of dynamic limits.
+  """
+  valueLimit: Variant
+
+  """
+  Type of the alarm's source.
+  """
+  sourceType: AlarmSourceType
+
+  """
+  States whether this alarm is unsuppressed, suppressed, or shelved.
+  """
+  suppressionState: AlarmSuppressionState
+
+  """
+  Name of the machine that hosts the originator of the alarm.
+  In case of operator-input alarm, the client machine from which the associated user input has been entered.
+  """
+  hostName: String
+
+  """
+  Name of the user related with the event.
+  """
+  userName: String
+
+  """
+  Value of the alarm.
+  """
+  value: Variant
+
+  """
+  Quality of the alarm's value.
+  """
+  valueQuality: Quality
+
+  """
+  Quality of the alarm's state value.
+  """
+  quality: Quality
+
+  """
+  Shows if any attribute or the configuration of the alarm is invalid.
+  """
+  invalidFlags: AlarmInvalidFlags
+
+  """
+  Hysteresis for the ValueLimit for delayed alarm generation.
+  """
+  deadband: Variant
+
+  """
+  Distinguishes certain (SIEMENS well-known) products or domain functions realizing alarm sources.
+  """
+  producer: AlarmProducer
+
+  """
+  Shows the duration that the alarm instance kept in active state.
+  """
+  duration: Timespan
+
+  """
+  Shows the duration in ISO format that the alarm instance kept in active state.
+  """
+  durationIso: TimespanIso
+
+  """
+  Shows if the logged alarm state has comments attached to it.
+  """
+  hasComments: Boolean
+}
+
+type ActiveAlarm {
+  """
+  Canonical name of the configured alarm.
+  """
+  name: String
+
+  """
+  A number, that identifies the instance of the configured alarm. Used for alarms that can have multiple active instances at the same time,
+  so that they can be differentiated.
+  """
+  instanceID: Int
+
+  """
+  Custom ID of the Alarm Group that this alarm belongs to.
+  """
+  alarmGroupID: Int
+
+  """
+  The time when the alarm was activated.
+  """
+  raiseTime: Timestamp
+
+  """
+  The time when the alarm was acknowledged by an operator.
+  """
+  acknowledgmentTime: Timestamp
+
+  """
+  The time when the alarm was cleared.
+  """
+  clearTime: Timestamp
+
+  """
+  The time when the alarm was reset.
+  """
+  resetTime: Timestamp
+
+  """
+  The time when the last modification on any attribute of the active alarm was done.
+  """
+  modificationTime: Timestamp
+
+  """
+  Actual state of the active alarm (can change according to the stateMachine attribute).
+  """
+  state: AlarmState
+
+  """
+  The text color of the alarm on an alarm screen.
+  """
+  textColor: Color
+
+  """
+  The background color of the alarm on an alarm screen.
+  """
+  backColor: Color
+
+  """
+  True, if the alarm should flash on an alarm screen.
+  """
+  flashing: Boolean
+
+  """
+  The languages selected by the client. The order of languages in this array corresponds to the text entries in each returned multilingual text attribute.
+  E.g., if the first language of this array is "en-US", the first entry of the event text will be in English.
+  """
+  languages: [String]
+
+  """
+  Canonical name of the alarm class configured for this alarm.
+  """
+  alarmClassName: String
+
+  """
+  Symbol of the alarm class configured for this alarm (language-dependent).
+  """
+  alarmClassSymbol: [String]
+
+  """
+  Custom ID of the alarm class configured for this alarm.
+  """
+  alarmClassID: Int
+
+  """
+  The state machine configured for this alarm. It defines the possible states of the alarm, and possible transitions between these states.
+  """
+  stateMachine: AlarmStateMachine
+
+  """
+  Current priority of the alarm. Possible ranges:
+  0: None (no priority is assigned to the alarm)
+  1-5: Low (mostly informative alarms)
+  6-10: Medium (warnings)
+  11-15: High (errors)
+  16: Highest (critical alarms)
+  """
+  priority: Int
+
+  """
+  A list of additional parameter values that are relevant from this alarm's point of view.
+  """
+  alarmParameterValues: [Variant]
+
+  """
+  Multilingual alarm text providing a distinction of the alarm condition. Possible values are product or user-defined.
+  This attribute is used only in DCS.
+  """
+  alarmType: [String]
+
+  """
+  Multilingual alarm text, usually contains the main message of the alarm.
+  """
+  eventText: [String]
+
+  """
+  Multilingual alarm text that can contain additional information for the operator, like instructions or standard operating procedure.
+  """
+  infoText: [String]
+
+  """
+  Multilingual alarm texts (1-9) for any additional information.
+  """
+  alarmText1: [String]
+  alarmText2: [String]
+  alarmText3: [String]
+  alarmText4: [String]
+  alarmText5: [String]
+  alarmText6: [String]
+  alarmText7: [String]
+  alarmText8: [String]
+  alarmText9: [String]
+
+  """
+  Localized, textual representation of the alarm state.
+  """
+  stateText: [String]
+
+  """
+  Name of the alarm generating object, specific to this alarm instance. It could be an operator station, or an automation function (block).
+  """
+  origin: String
+
+  """
+  Name of the area that this specific alarm instance is related to.
+  """
+  area: String
+
+  """
+  The reason of modification to this alarm instance.
+  """
+  changeReason: [AlarmChangeReason]
+
+  """
+  Name of the corresponding HMI connection. Relevant only for controller-based alarms.
+  """
+  connectionName: String
+
+  """
+  Current triggering limit of the value when the alarm was raised; updated value limit when the alarm cleared in case of dynamic limits.
+  """
+  valueLimit: Variant
+
+  """
+  Type of the alarm's source.
+  """
+  sourceType: AlarmSourceType
+
+  """
+  States whether this alarm is unsuppressed, suppressed, or shelved.
+  """
+  suppressionState: AlarmSuppressionState
+
+  """
+  Name of the machine that hosts the originator of the alarm.
+  In case of operator-input alarm, the client machine from which the associated user input has been entered.
+  """
+  hostName: String
+
+  """
+  Name of the user related with the event.
+  """
+  userName: String
+
+  """
+  Value of the alarm.
+  """
+  value: Variant
+
+  """
+  Quality of the alarm's value.
+  """
+  valueQuality: Quality
+
+  """
+  Quality of the alarm's state value.
+  """
+  quality: Quality
+
+  """
+  Shows if any attribute or the configuration of the alarm is invalid.
+  """
+  invalidFlags: AlarmInvalidFlags
+
+  """
+  Hysteresis for the ValueLimit for delayed alarm generation.
+  """
+  deadBand: Variant
+
+  """
+  Distinguishes certain (SIEMENS well-known) products or domain functions realizing alarm sources.
+  """
+  producer: AlarmProducer
+
+  """
+  Defines for how long the alarm should be displayed on the alarm screen.
+  """
+  duration: Timespan
+
+  """
+  Shows the duration in ISO format that the alarm instance kept in active state.
+  """
+  durationIso: TimespanIso
+
+  """
+  Stores the ID of the alarm source that produced the alarm.
+  In case of controller alarms the attribute 'SourceID' is assigned by the communication driver based on the external alarm source reference, e.g. the alarm range ID of S7 controller.
+  In case of application alarms the attribute 'SourceID' is assigned by the application/service to relate the alarm to a service-specific object instance, e.g. "recipe name/ID" assigned by the Parameter Control service.
+  """
+  sourceID: String
+
+  """
+  Severity of the alarm from the system health perspective. The more severe system alarms a host has, the less healthy it is considered.
+  In a redundant system, losing health results in making the healthier host the "active" one, and the other the "passive" one.
+  """
+  systemSeverity: Int
+
+  """
+  LoopInAlarm is a script function, that shows the screen, where the origin of the alarm is.
+  It can be called from the alarm screen, if defined.
+  """
+  loopInAlarm: String
+
+  """
+  Parameters that are required for the loop in alarm function.
+  """
+  loopInAlarmParameterValues: Variant
+
+  """
+  The full name of the alarm (including system name, tag name, tag-element names and alarm name) with the following format:
+  SystemName::TagName.ElementPath:AlarmName, where the ElementPath can be multiple element names separated with a dot,
+  depending on the element hierarchy (e.g. Tag1.RootElement.ChildElement).
+  """
+  path: String
+
+  """
+  Indicates the expected user response.
+  """
+  userResponse: AlarmUserResponse
+}
+
+type ActiveAlarmNotification {
+  """
+  Canonical name of the configured alarm.
+  """
+  name: String
+
+  """
+  A number, that identifies the instance of the configured alarm. Used for alarms that can have multiple active instances at the same time,
+  so that they can be differentiated.
+  """
+  instanceID: Int
+
+  """
+  Custom ID of the Alarm Group that this alarm belongs to.
+  """
+  alarmGroupID: Int
+
+  """
+  The time when the alarm was activated.
+  """
+  raiseTime: Timestamp
+
+  """
+  The time when the alarm was acknowledged by an operator.
+  """
+  acknowledgmentTime: Timestamp
+
+  """
+  The time when the alarm was cleared.
+  """
+  clearTime: Timestamp
+
+  """
+  The time when the alarm was reset.
+  """
+  resetTime: Timestamp
+
+  """
+  The time when the last modification on any attribute of the active alarm was done.
+  """
+  modificationTime: Timestamp
+
+  """
+  Actual state of the active alarm (can change according to the stateMachine attribute).
+  """
+  state: AlarmState
+
+  """
+  Actual text color of the alarm on an alarm screen.
+  """
+  textColor: Color
+
+  """
+  Actual background color of the alarm on an alarm screen.
+  """
+  backColor: Color
+
+  """
+  True, if the alarm should flash on an alarm screen.
+  """
+  flashing: Boolean
+
+  """
+  The languages selected by the client. The order of languages in this array corresponds to the text entries in each returned multilingual text attribute.
+  E.g., if the first language of this array is "en-US", the first entry of the event text will be in english.
+  """
+  languages: [String]
+
+  """
+  Canonical name of the alarm class configured for this alarm.
+  """
+  alarmClassName: String
+
+  """
+  Symbol of the alarm class configured for this alarm. Language-dependent.
+  """
+  alarmClassSymbol: [String]
+
+  """
+  Custom ID of the alarm class configured for this alarm.
+  """
+  alarmClassID: Int
+
+  """
+  The state machine configured for this alarm. It defines the possible states of the alarm, and possible transitions between these states.
+  """
+  stateMachine: AlarmStateMachine
+
+  """
+  Current priority of the alarm. Possible ranges:
+  0: None (no priority is assigned to the alarm)
+  1-5: Low (mostly informative alarms)
+  6-10: Medium (warnings)
+  11-15: High (errors)
+  16: Highest (critical alarms)
+  """
+  priority: Int
+
+  """
+  A list of additional parameter values that are relevant from this alarm's point of view.
+  """
+  alarmParameterValues: [Variant]
+
+  """
+  Multilingual alarm text providing distinction of the alarm condition, product or user-defined.
+  This attribute is used only in DCS.
+  """
+  alarmType: [String]
+
+  """
+  Multilingual alarm text, contains usually the main information content of the alarm.
+  """
+  eventText: [String]
+
+  """
+  Multilingual alarm text that can contain additional information for the operator, like instructions or standard operating procedure.
+  """
+  infoText: [String]
+
+  """
+  Multilingual alarm texts (1-9) for any additional information.
+  """
+  alarmText1: [String]
+  alarmText2: [String]
+  alarmText3: [String]
+  alarmText4: [String]
+  alarmText5: [String]
+  alarmText6: [String]
+  alarmText7: [String]
+  alarmText8: [String]
+  alarmText9: [String]
+
+  """
+  Localized, textual representation of the alarm state.
+  """
+  stateText: [String]
+
+  """
+  Name of the alarm generating object, specific to this alarm instance. It could be an operator station, or an automation function (block).
+  """
+  origin: String
+
+  """
+  Name of the area that this specific alarm instance is related to.
+  """
+  area: String
+
+  """
+  The reason of modification to this alarm instance.
+  """
+  changeReason: [AlarmChangeReason]
+
+  """
+  Name of the corresponding HMI connection. Relevant only for controller-based alarms.
+  """
+  connectionName: String
+
+  """
+  Current triggering limit of the value when the alarm was raised; updated value limit when the alarm cleared in case of dynamic limits.
+  """
+  valueLimit: Variant
+
+  """
+  Type of the alarm's source.
+  """
+  sourceType: AlarmSourceType
+
+  """
+  States whether this alarm is unsuppressed, suppressed, or shelved.
+  """
+  suppressionState: AlarmSuppressionState
+
+  """
+  Name of the machine that hosts the originator of the alarm.
+  In case of operator-input alarm, the client machine from which the associated user input has been entered.
+  """
+  hostName: String
+
+  """
+  Name of the user related with the event.
+  """
+  userName: String
+
+  """
+  Value of the alarm.
+  """
+  value: Variant
+
+  """
+  Quality of the alarm's value.
+  """
+  valueQuality: Quality
+
+  """
+  Quality of the alarm's state value.
+  """
+  quality: Quality
+
+  """
+  Shows if any attribute or the configuration of the alarm is invalid.
+  """
+  invalidFlags: AlarmInvalidFlags
+
+  """
+  Hysteresis for the ValueLimit for delayed alarm generation.
+  """
+  deadBand: Variant
+
+  """
+  Distinguishes certain (SIEMENS well-known) products or domain functions realizing alarm sources.
+  """
+  producer: AlarmProducer
+
+  """
+  Defines for how long the alarm should be displayed on the alarm screen.
+  """
+  duration: Timespan
+
+  """
+  Shows the duration in ISO format that the alarm instance kept in active state.
+  """
+  durationIso: TimespanIso
+
+  """
+  Stores the ID of the alarm source that produced the alarm.
+  In case of controller alarms attribute 'SourceID' is assigned by the communication driver based on the external alarm source reference, e.g. the alarm range ID of S7 controller.
+  In case of application alarms attribute 'SourceID' is assigned by the application/service to relate the alarm to a service-specific object instance, e.g. "recipe name/ID" assigned by the Parameter Control service.
+  """
+  sourceID: String
+
+  """
+  Severity of the alarm from the system health perspective. The more severe system alarms a host has, the less healthy it is considered.
+  In a redundant system, losing health results in making the healthier host the "active" one, and the other the "passive" one.
+  """
+  systemSeverity: Int
+
+  """
+  LoopInAlarm is a script function, that shows the screen, where the origin of the alarm is.
+  It can be called from the alarm screen, if defined.
+  """
+  loopInAlarm: String
+
+  """
+  Parameters that are required for the loop in alarm function.
+  """
+  loopInAlarmParameterValues: Variant
+
+  """
+  The full name of the alarm (including system name, tag name, tag-element names and alarm name) with the following format:
+  SystemName::TagName.ElementPath:AlarmName, where the ElementPath can be multiple element names separated with a dot,
+  depending on the element hierarchy (e.g. Tag1.RootElement.ChildElement).
+  """
+  path: String
+
+  """
+  Indicates the expected user response.
+  """
+  userResponse: AlarmUserResponse
+
+  """
+  The reason for the notification (alarm added, changed or removed).
+  """
+  notificationReason: String
+}
+
+enum AlarmState {
+  """
+  Normal state, no active alarm
+  """
+  NORMAL
+
+  """
+  Alarm activated (or "came")
+  """
+  RAISED
+
+  """
+  Alarm activated and cleared (or "came & gone")
+  """
+  RAISED_CLEARED
+
+  """
+  Alarm activated and acknowledged by an operator (or "came & ack'ed")
+  """
+  RAISED_ACKNOWLEDGED
+
+  """
+  Alarm activated, acknowledged first by an operator and then cleared (or "came, ack'ed & gone")
+  """
+  RAISED_ACKNOWLEDGED_CLEARED
+
+  """
+  Alarm activated, cleared first and then acknowledged by an operator (or "come, gone & ack'ed")
+  """
+  RAISED_CLEARED_ACKNOWLEDGED
+
+  """
+   Alarm removed as a result of one of the following cases:
+  - Alarm has been disabled
+  - New alarm is raised while current alarm has not been acknowledged (or reset) by the operator (no "system acknowledgment" for chattering alarms!)
+  - Active alarm instance no longer available in the alarm source after synchronization with the alarm source, i.e. as a result of reconnect or PLC restart
+  - Missed alarm state change notifications, i.e. as a result of overflow conditions in the alarm source
+  - Alarm configuration no longer available after configuration change, either PLC or HMI system
+  """
+  REMOVED
+}
+
+enum AlarmStateMachine {
+  """
+  Stateless information message; raise event only.
+  """
+  RAISE
+
+  """
+  Notification processes a raise and a clear event; without acknowledgment.
+  """
+  RAISE_CLEAR
+
+  """
+  Alarm processes a raise event with mandatory acknowledgment.
+  """
+  RAISE_REQUIRES_ACKNOWLEDGMENT
+
+  """
+  Alarm processes a raise and a clear event with optional acknowledgment as long as the alarm has not been cleared.
+  """
+  RAISE_CLEAR_OPTIONAL_ACKNOWLEDGMENT
+
+  """
+  Alarm processes a raise and a clear event; with mandatory acknowledgment, even if the alarm has already been cleared.
+  """
+  RAISE_CLEAR_REQUIRES_ACKNOWLEDGMENT
+
+  """
+  Alarm processes a raise and a clear event with mandatory acknowledgment and reset.
+  """
+  RAISE_CLEAR_REQUIRES_ACKNOWLEDGMENT_AND_RESET
+}
+
+enum AlarmChangeReason {
+  """
+  Alarm state has changed: transition to 'raise' state.
+  """
+  ALARM_STATE_CHANGED_RAISE_EVENT
+
+  """
+  Alarm state has changed: transition to 'clear' state.
+  """
+  ALARM_STATE_CHANGED_CLEAR_EVENT
+
+  """
+  Alarm state has changed: transition to 'acknowledged' state.
+  """
+  ALARM_STATE_CHANGED_ACKNOWLEDGE_EVENT
+
+  """
+  Alarm state has changed: transition to 'reset' state.
+  """
+  ALARM_STATE_CHANGED_RESET_EVENT
+
+  """
+  Alarm state has changed: transition to 'removed' state.
+  """
+  ALARM_STATE_CHANGED_REMOVE_EVENT
+
+  """
+   Quality has changed.
+  Example connection loss: in case of connection loss a certain HmiActiveAlarm remains in state 'RaisedAcknowledged'.
+  The timestamps of attributes 'RaiseTime' and 'AcknowledgmentTime' remain unchanged.
+  The timestamp of attribute 'ModificationTime' is updated with the timestamp of the connection loss and attribute 'Quality' changes to "uncertain, last usable value".
+  """
+  ALARM_QUALITY_CHANGED
+
+  """
+  At least one or multiple values of AlarmParameterValues have changed.
+  """
+  ALARM_PARAMETER_VALUES_CHANGED
+
+  """
+  Priority has changed.
+  """
+  ALARM_PRIORITY_CHANGED
+
+  """
+  Suppression state has changed.
+  """
+  ALARM_SUPPRESSION_STATE_CHANGED
+
+  """
+  Escalation reason has changed.
+  """
+  ALARM_ESCALATION_REASON_CHANGED
+
+  """
+  Enable state changed.
+  """
+  ALARM_ENABLE_STATE_CHANGED
+
+  """
+  Configuration of the alarm has changed.
+  """
+  ALARM_CONFIGURATION_CHANGED
+
+  """
+  HmiActiveAlarm attribute 'ModificationTime' only has changed to support application specific alarm handling scenarios; e.g. mobile equipment association by the CPM Runtime Subsystem.
+  """
+  ALARM_EXTERNAL_UPDATE
+}
+
+enum AlarmSourceType {
+  TAG
+  CONTROLLER
+  SYSTEM
+  SUMMARY_ALARM
+}
+
+enum AlarmSuppressionState {
+  """
+  The alarm is not suppressed and thus annunciated to operators.
+  """
+  UNSUPPRESSED
+
+  """
+  The alarm has been suppressed by design. Corresponding HmiActiveAlarms may exist but are not visible in alarm displays since they are irrelevant and thus not annunciated to operators.
+  """
+  SUPPRESSED
+
+  """
+  The alarm has been suppressed manually and thus not annunciated to operators.
+  """
+  SHELVED
+
+  """
+   The alarm has been suppressed by design and manually.
+  - When unsuppressing by design, the alarm remains suppressed by design;
+  - When unshelving, the alarm remains suppressed by design;.
+  """
+  SUPPRESSED_AND_SHELVED
+}
+
+type AlarmInvalidFlags {
+  invalidConfiguration: Boolean
+  invalidTimestamp: Boolean
+  invalidAlarmParameter: Boolean
+  invalidEventText: Boolean
+}
+
+enum AlarmProducer {
+  IEPCL_OR_USER_ALARM
+  RSE
+  WR_USMSG
+  SIMOTION_CLASSIC
+  SYS_DIAG
+  SMC
+  SECURITY
+  SINUMERIC
+  GRAPH
+  PRO_DIAG
+  WINCC
+}
+
+enum AlarmUserResponse {
+  """
+  The alarm is in state not requiring/expecting a user response.
+  """
+  NONE
+
+  """
+  The ActiveAlarm requires/expects acknowledgment from the user.
+  """
+  ACKNOWLEDGEMENT
+
+  """
+  The ActiveAlarm requires reset from the user to complete the alarm state machine.
+  """
+  RESET
+
+  """
+  The ActiveAlarm requires/expects explicit (single) acknowledgment from the user.
+  """
+  SINGLE_ACKNOWLEDGEMENT
+
+  """
+  The ActiveAlarm requires explicit (single) reset from the user.
+  """
+  SINGLE_RESET
+}
+
+type ReduStateNotification {
+  value: ReduStateValue
+  notificationReason: String
+}
+
+type ReduStateValue {
+  value: ReduState
+  timestamp: Timestamp
+}
+
+enum ReduState {
+  """
+  The current host (and therefore the GraphQL Server that sent this information) is in active state.
+  """
+  ACTIVE
+
+  """
+  The current host (and therefore the GraphQL Server that sent this information) is in passive state.
+  """
+  PASSIVE
+}
