@@ -1,4 +1,4 @@
-# WinCC Unified Extended MCP Server
+# WinCC Unified MCP Server
 
 A Model Context Protocol (MCP) server designed to interface with SIEMENS WinCC Unified SCADA systems via their GraphQL API. This server exposes various WinCC Unified functionalities as MCP tools, allowing AI assistants and other MCP-compatible clients to interact with the SCADA system.
 
