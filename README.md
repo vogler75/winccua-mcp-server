@@ -72,6 +72,10 @@ export GRAPHQL_PWD="password1"
 
 The MCP server will start and listen on port `3000` by default. MCP requests are expected at the `/mcp` endpoint (e.g., `http://localhost:3000/mcp`).
 
+## Disclaimer
+
+**Security Notice:** This server has not been hardened or secured for production use. It is the responsibility of the user to implement appropriate security measures (such as authentication, authorization, network restrictions, and HTTPS) before deploying or exposing this server in any environment.
+
 ## Connecting with a Claude Desktop Client
 
 To use this MCP server with the Claude AI desktop application (or other clients supporting `mcp-remote`), you need to configure the client to connect to this server. For the Claude Desktop application, this is typically done by editing a `claude_desktop_config.json` file. The location of this file varies by operating system but is usually within the Claude application's support or configuration directory.
