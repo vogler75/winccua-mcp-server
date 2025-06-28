@@ -37,6 +37,7 @@ The server is configured using environment variables:
 export GRAPHQL_URL="http://localhost:4000/graphql"
 export GRAPHQL_USR="username1"
 export GRAPHQL_PWD="password1"
+export NODE_TLS_REJECT_UNAUTHORIZED=0 # Set to 0 to disable TLS certificate validation (development only)
 ```
 
 ## How to Start
