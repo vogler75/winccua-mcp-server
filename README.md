@@ -71,7 +71,13 @@ export NODE_TLS_REJECT_UNAUTHORIZED=0 # Set to 0 to disable TLS certificate vali
     node index.js
     ```
 
-The MCP server will start and listen on port `3000` by default. MCP requests are expected at the `/mcp` endpoint (e.g., `http://localhost:3000/mcp`).
+The MCP server will start and listen on port `3000` by default. You can configure the port using the `MCP_PORT` environment variable:
+
+```bash
+MCP_PORT=8080 node index.js
+```
+
+MCP requests are expected at the `/mcp` endpoint (e.g., `http://localhost:3000/mcp`).
 
 ## Disclaimer
 

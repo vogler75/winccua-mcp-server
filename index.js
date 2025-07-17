@@ -1210,7 +1210,7 @@ app.delete('/mcp', async (req, res) => {
 });
 
 // Start the server
-const PORT = 3000;
+const PORT = process.env.MCP_PORT || 3000;
 app.listen(PORT, () => {
   console.log(`MCP Extended WinCC OA Server listening on port ${PORT}`);
   console.log(`Server ready with WinCC Unified tools available`);
